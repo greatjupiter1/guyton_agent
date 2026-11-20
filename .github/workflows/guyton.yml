@@ -1,0 +1,58 @@
+name: Build Guyton lesson
+
+# Triggered manually (Actions tab -> Run workflow) or by the Cloudflare
+# daily-post-agent via repository_dispatch with type "build-guyton-lesson".
+on:
+  workflow_dispatch: {}
+  repository_dispatch:
+    types: [build-guyton-lesson]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: guyton-lesson
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system packages (ffmpeg, DejaVu fonts)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core unzip curl
+
+      - name: Install Vazirmatn font (Persian subtitles)
+        run: |
+          mkdir -p fonts
+          curl -sL -o /tmp/vazirmatn.zip \
+            https://github.com/rastikerdar/vazirmatn/releases/download/v33.003/vazirmatn-v33.003.zip
+          unzip -o /tmp/vazirmatn.zip 'fonts/ttf/Vazirmatn-Bold.ttf' 'fonts/ttf/Vazirmatn-Regular.ttf' -d /tmp/vazirmatn
+          cp /tmp/vazirmatn/fonts/ttf/Vazirmatn-Bold.ttf /tmp/vazirmatn/fonts/ttf/Vazirmatn-Regular.ttf fonts/
+          ls -la fonts/
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build and send the next lesson (fail-closed)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python build_lesson.py
+
+      - name: Save progress (advance state.json)
+        if: success()
+        run: |
+          git config user.name "guyton-agent"
+          git config user.email "guyton-agent@users.noreply.github.com"
+          git add state.json
+          git diff --cached --quiet || git commit -m "advance to next page"
+          git push
