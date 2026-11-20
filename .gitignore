@@ -1,0 +1,5 @@
+out/
+work/
+guyton13.pdf
+__pycache__/
+*.pyc
