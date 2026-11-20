@@ -290,7 +290,7 @@ Return ONLY a JSON object (no markdown, no extra text) with EXACTLY these keys:
 - "explanation_fa": a detailed Persian explanation (شرح) that teaches this page step by step, section by section, following the page's own order. Use ### headings for sub-sections. Every technical term is explained at its first use, with the English term in parentheses, e.g. سلول (Cell). Write for a medical student; be thorough but clear.
 - "explanation_summaries_en": a list of short English summaries (1-2 simple sentences each), ONE per ### section of explanation_fa, in the same order. These are spoken aloud in the lesson film.
 - "categories": if the page contains a clear categorisation or list (for example the branches of a science, types of something), an object {{"title_en": "...", "title_fa": "...", "items": [{{"en": "...", "fa": "..."}}]}} with 3-10 items; otherwise null.
-- "visuals": the animation plan for the lesson film: {{"paragraphs": [...], "points": [...]}}. "paragraphs" holds EXACTLY {n_paras} items — one for each paragraph of the page text below, in the same order. "points" holds EXACTLY one item per "explanation_summaries_en" entry, in the same order. Each item is {{"kind": ..., "en": "...", "fa": "..."}}. "kind" is the animation that best matches what that paragraph/point describes, chosen ONLY from: "flow" (something moving along a path or vessel), "exchange" (two spaces swapping molecules across a membrane), "carrier" (a carrier ferrying molecules across a membrane), "levels" (amounts or levels rising and falling), "assemble" (small units joining into a larger structure), "cycle" (a process going round and round in a loop), "cell" (activity inside a living cell), "compare" (two sides with different amounts or activity). "en" is a very short English label (at most 8 words) naming what moves, e.g. "oxygen molecules leave the blood". "fa" is the same short label in Persian.
+- "visuals": the animation plan for the lesson film: {{"paragraphs": [...], "points": [...]}}. "paragraphs" holds EXACTLY {n_paras} items — one for each paragraph of the page text below, in the same order. "points" holds EXACTLY one item per "explanation_summaries_en" entry, in the same order. Each item is {{"kind": ..., "en": "...", "fa": "..."}}. "kind" is the animation that best matches what that paragraph/point describes, chosen ONLY from: "flow" (something moving along a path or vessel), "exchange" (two spaces swapping molecules across a membrane), "carrier" (a carrier ferrying molecules across a membrane), "levels" (amounts or levels rising and falling), "assemble" (small units joining into a larger structure), "cycle" (a process going round and round in a loop), "cell" (activity inside a living cell), "compare" (two sides with different amounts or activity). "en" is a very short English label (at most 8 words) naming what moves, e.g. "oxygen molecules leave the blood". "fa" is the same short label in Persian. THE LAW OF THIS COURSE: every concept taught in this lesson — in every paragraph of the page and in every explanation point — MUST be explained by its own process animation whose motion shows that very concept happening, and the label must name the actual moving elements of that concept. Never assign a generic, decorative or unrelated animation to a concept; if a concept describes a process, its animation must depict that process itself.
 - "quiz": EXACTLY 4 questions based ONLY on this page: [{{"q_fa": "question in Persian", "a_fa": "full answer in Persian", "q_en": "the same question in English", "a_en": "the same answer in English"}}].
 
 PAGE TEXT:
@@ -1724,18 +1724,25 @@ def build_scenes(content, english_paras, translation_paras, page_png,
       lambda p, t, dur, bottom, fr: paint_page(p, bottom, page_png),
       min_dur=7.0)
 
-    # CINEMATIC CONTENT ANIMATION: each paragraph/point is paired with
-    # its visual spec (validated upstream); the animation is the scene's
-    # main visual and the text accompanies it in the alongside panel.
+    # CINEMATIC CONTENT ANIMATION — THE LAW OF THIS COURSE: every concept
+    # taught (each paragraph, each explanation point) MUST be explained by
+    # its own process animation depicting that concept itself. There is no
+    # fallback animation: a missing spec fails the build (fail-closed), so
+    # no concept can ever be presented as text alone or with a generic
+    # animation. The text accompanies the animation in the alongside panel.
     visuals = content.get("visuals") or {}
     para_visuals = visuals.get("paragraphs") or []
     point_visuals = visuals.get("points") or []
 
     def para_spec(i):
-        return para_visuals[i] if i < len(para_visuals) else DEFAULT_VISUAL
+        if i >= len(para_visuals):
+            raise Fail(f"paragraph {i + 1} has no process-animation spec")
+        return para_visuals[i]
 
     def point_spec(j):
-        return point_visuals[j] if j < len(point_visuals) else DEFAULT_VISUAL
+        if j >= len(point_visuals):
+            raise Fail(f"explanation point {j + 1} has no process-animation spec")
+        return point_visuals[j]
 
     for i, para in enumerate(english_paras):
         head, body = detect_head(para)
