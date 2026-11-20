@@ -19,7 +19,7 @@ FAIL-CLOSED: any error anywhere exits non-zero and nothing is sent.
 
 Secrets come from the environment only (GitHub Secrets at runtime):
   TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, CHAT_ID.
-Optional env: GEMINI_MODEL (default gemini-2.5-flash), EDGE_TTS_PROXY,
+Optional env: GEMINI_MODEL (default gemini-3.8-flash), EDGE_TTS_PROXY,
 VAZIRMATN_DIR (folder containing Vazirmatn-Bold.ttf / -Regular.ttf).
 
 --dry-run: build everything into out/ (page.png, lesson.md, film.mp4),
@@ -299,7 +299,7 @@ def call_gemini(page_text, printed_page):
     api_key = os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
         raise Fail("GEMINI_API_KEY is not set")
-    model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"{model}:generateContent")
     body = {
