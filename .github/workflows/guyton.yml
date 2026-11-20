@@ -1,11 +1,14 @@
 name: Build Guyton lesson
 
-# Triggered manually (Actions tab -> Run workflow) or by the Cloudflare
-# daily-post-agent via repository_dispatch with type "build-guyton-lesson".
+# Triggered daily on schedule (08:00 UTC = 11:30 Asia/Tehran), manually
+# (Actions tab -> Run workflow), or by the Cloudflare daily-post-agent via
+# repository_dispatch with type "build-guyton-lesson".
 on:
   workflow_dispatch: {}
   repository_dispatch:
     types: [build-guyton-lesson]
+  schedule:
+    - cron: "0 8 * * *"
 
 permissions:
   contents: write
