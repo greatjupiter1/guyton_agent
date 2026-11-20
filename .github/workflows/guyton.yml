@@ -1,6 +1,7 @@
 name: Build Guyton lesson
 
-# Triggered daily on schedule (08:00 UTC = 11:30 Asia/Tehran), manually
+# Triggered every 6 hours on the hour Tehran time (00:00 / 06:00 / 12:00 /
+# 18:00 Asia/Tehran = 20:30 / 02:30 / 08:30 / 14:30 UTC), manually
 # (Actions tab -> Run workflow), or by the Cloudflare daily-post-agent via
 # repository_dispatch with type "build-guyton-lesson".
 on:
@@ -8,7 +9,7 @@ on:
   repository_dispatch:
     types: [build-guyton-lesson]
   schedule:
-    - cron: "0 8 * * *"
+    - cron: "30 2,8,14,20 * * *"
 
 permissions:
   contents: write
