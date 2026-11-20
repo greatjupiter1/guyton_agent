@@ -7,10 +7,14 @@ Physiology*, 13th edition:
   2. extract the page's exact English text,
   3. ask Google Gemini for the Persian translation, a detailed Persian
      explanation (شرح) and a 4-question quiz (JSON mode, fail-closed),
-  4. build a FULLY ANIMATED teaching film (FULL-ANIMATION LAW: everything
-     is animated from the first second to the last — no static slides;
-     tables/categorisations are built row by row inside the animation)
-     with English narration (edge-tts) and dual EN+FA burned-in subtitles,
+  4. build a CINEMATIC CONTENT-ANIMATION teaching film (Jupiter's rule:
+     from the first second to the last, the main visual is an animated
+     depiction of the lesson's subject matter itself — the physiological
+     processes shown moving, like a film of the lesson; the lesson text
+     and شرح accompany it in an alongside panel, never as full-screen
+     text slides; tables/categorisations are built row by row inside
+     the animation) with English narration (edge-tts) and dual EN+FA
+     burned-in subtitles,
   5. send everything to Telegram in the fixed order
      page image -> English text -> translation -> شرح -> film -> quiz,
   6. only then advance state.json by one page.
@@ -286,6 +290,7 @@ Return ONLY a JSON object (no markdown, no extra text) with EXACTLY these keys:
 - "explanation_fa": a detailed Persian explanation (شرح) that teaches this page step by step, section by section, following the page's own order. Use ### headings for sub-sections. Every technical term is explained at its first use, with the English term in parentheses, e.g. سلول (Cell). Write for a medical student; be thorough but clear.
 - "explanation_summaries_en": a list of short English summaries (1-2 simple sentences each), ONE per ### section of explanation_fa, in the same order. These are spoken aloud in the lesson film.
 - "categories": if the page contains a clear categorisation or list (for example the branches of a science, types of something), an object {{"title_en": "...", "title_fa": "...", "items": [{{"en": "...", "fa": "..."}}]}} with 3-10 items; otherwise null.
+- "visuals": the animation plan for the lesson film: {{"paragraphs": [...], "points": [...]}}. "paragraphs" holds EXACTLY {n_paras} items — one for each paragraph of the page text below, in the same order. "points" holds EXACTLY one item per "explanation_summaries_en" entry, in the same order. Each item is {{"kind": ..., "en": "...", "fa": "..."}}. "kind" is the animation that best matches what that paragraph/point describes, chosen ONLY from: "flow" (something moving along a path or vessel), "exchange" (two spaces swapping molecules across a membrane), "carrier" (a carrier ferrying molecules across a membrane), "levels" (amounts or levels rising and falling), "assemble" (small units joining into a larger structure), "cycle" (a process going round and round in a loop), "cell" (activity inside a living cell), "compare" (two sides with different amounts or activity). "en" is a very short English label (at most 8 words) naming what moves, e.g. "oxygen molecules leave the blood". "fa" is the same short label in Persian.
 - "quiz": EXACTLY 4 questions based ONLY on this page: [{{"q_fa": "question in Persian", "a_fa": "full answer in Persian", "q_en": "the same question in English", "a_en": "the same answer in English"}}].
 
 PAGE TEXT:
@@ -302,9 +307,10 @@ def call_gemini(page_text, printed_page):
     model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"{model}:generateContent")
+    n_paras = len([p for p in page_text.split("\n\n") if p.strip()])
     body = {
         "contents": [{"parts": [{"text": GEMINI_PROMPT.format(
-            page=printed_page, text=page_text)}]}],
+            page=printed_page, text=page_text, n_paras=n_paras)}]}],
         "generationConfig": {"responseMimeType": "application/json",
                              "temperature": 0.4},
     }
@@ -322,10 +328,27 @@ def call_gemini(page_text, printed_page):
         data = json.loads(text)
     except Exception as e:
         raise Fail(f"Gemini reply is not valid JSON: {e}")
-    return validate_content(data)
+    return validate_content(data, n_paragraphs=n_paras)
 
 
-def validate_content(data):
+# Animation kinds the film renderer actually implements. Gemini must pick
+# every scene's visual from this controlled vocabulary (fail-closed).
+VISUAL_KINDS = {"flow", "exchange", "carrier", "levels", "assemble",
+                "cycle", "cell", "compare"}
+
+
+def _validate_visual(spec, where):
+    if not isinstance(spec, dict):
+        raise Fail(f"visual spec for {where} is not an object")
+    if spec.get("kind") not in VISUAL_KINDS:
+        raise Fail(f"visual spec for {where} has invalid kind: {spec.get('kind')!r}")
+    for k in ("en", "fa"):
+        v = spec.get(k)
+        if not isinstance(v, str) or not v.strip() or len(v) > 120:
+            raise Fail(f"visual spec for {where} lacks a short {k} label")
+
+
+def validate_content(data, n_paragraphs=None):
     if not isinstance(data, dict):
         raise Fail("lesson content is not a JSON object")
     for key in ("translation_fa", "explanation_fa", "explanation_summaries_en", "quiz"):
@@ -346,6 +369,24 @@ def validate_content(data):
     if cat is not None:
         if not isinstance(cat, dict) or not isinstance(cat.get("items"), list) or not cat["items"]:
             raise Fail("categories is malformed")
+    # CINEMATIC CONTENT ANIMATION: every content unit (each exact-text
+    # paragraph, each explanation point) must carry a valid visual spec.
+    vis = data.get("visuals")
+    if not isinstance(vis, dict):
+        raise Fail("lesson content is missing the visuals animation plan")
+    paras_v, points_v = vis.get("paragraphs"), vis.get("points")
+    if not isinstance(paras_v, list) or not paras_v:
+        raise Fail("visuals.paragraphs must be a non-empty list")
+    if n_paragraphs is not None and len(paras_v) != n_paragraphs:
+        raise Fail(f"visuals.paragraphs has {len(paras_v)} items, "
+                   f"expected exactly {n_paragraphs} (one per page paragraph)")
+    if not isinstance(points_v, list) or \
+            len(points_v) != len(data["explanation_summaries_en"]):
+        raise Fail("visuals.points must match explanation_summaries_en one to one")
+    for i, s in enumerate(paras_v):
+        _validate_visual(s, f"paragraph {i + 1}")
+    for i, s in enumerate(points_v):
+        _validate_visual(s, f"explanation point {i + 1}")
     return data
 
 
@@ -380,6 +421,27 @@ FIXTURE_CATEGORIES = {
         {"en": "Vertebrate physiology", "fa": "فیزیولوژی مهره‌داران"},
         {"en": "Mammalian physiology", "fa": "فیزیولوژی پستانداران"},
         {"en": "Human physiology", "fa": "فیزیولوژی انسان"},
+    ],
+}
+# Animation plan for the page-3 fixture: one visual per English paragraph
+# (same order as the sample text) and one per explanation point (same
+# order as FIXTURE_SUMMARIES_EN). Kinds are from VISUAL_KINDS.
+FIXTURE_VISUALS = {
+    "paragraphs": [
+        {"kind": "levels", "en": "life at every scale, virus to human",
+         "fa": "حیات در همهٔ مقیاس‌ها، از ویروس تا انسان"},
+        {"kind": "cycle", "en": "control systems sense and respond",
+         "fa": "دستگاه‌های کنترلی حس می‌کنند و پاسخ می‌دهند"},
+        {"kind": "assemble", "en": "cells join together, forming an organ",
+         "fa": "سلول‌ها کنار هم اندام را می‌سازند"},
+    ],
+    "points": [
+        {"kind": "flow", "en": "physical and chemical steps at work",
+         "fa": "مراحل فیزیکی و شیمیایی در کار"},
+        {"kind": "cycle", "en": "a need is sensed, the body responds",
+         "fa": "نیاز حس می‌شود و بدن پاسخ می‌دهد"},
+        {"kind": "cell", "en": "inside the living cell",
+         "fa": "درون سلول زنده"},
     ],
 }
 
@@ -438,10 +500,11 @@ def load_fixture(printed_page):
         "explanation_fa": explanation,
         "explanation_summaries_en": FIXTURE_SUMMARIES_EN,
         "categories": FIXTURE_CATEGORIES,
+        "visuals": FIXTURE_VISUALS,
         "quiz": quiz,
         "_fixture_english_paragraphs": en_paras,
     }
-    validate_content(data)
+    validate_content(data, n_paragraphs=len(en_paras))
     return data
 
 
@@ -639,8 +702,9 @@ def _fade(col, bg, a):
     return tuple(int(bg[i] + (col[i] - bg[i]) * a) for i in range(3))
 
 
-def paint_title(p, bottom, printed_page):
+def paint_title(p, bottom, printed_page, t=0.0):
     img, d = slide_base()
+    draw_ambient(d, t, bottom)
     mid = bottom // 2
     lw = int(1160 * min(1.0, p * 2.2))
     d.rectangle([(W - lw) // 2, mid - 218, (W + lw) // 2, mid - 214], fill=GOLD)
@@ -774,6 +838,427 @@ def paint_explain(p, bottom, title_fa, body_fa):
         draw_fa(d, (W - 100, yy), ln, F("fa_r", 23), WHITE, anchor="ra")
         yy += 30
     return img
+
+
+# ------------------------- cinematic content-animation scenes (Jupiter)
+# CINEMATIC CONTENT ANIMATION rule: the main visual of every content
+# scene is an animated depiction of the lesson's subject matter itself
+# (a "visual" spec from the controlled vocabulary in VISUAL_KINDS),
+# drawn in a stage on the left ~60% of the frame; the scene's text sits
+# in a panel on the right and appears progressively with the narration.
+# Every primitive's elements move with absolute time t, so no frame is
+# ever a static text slide.
+ANIM_X0, ANIM_X1 = 44, 796
+PANEL_X0, PANEL_X1 = 820, 1236
+DEFAULT_VISUAL = {"kind": "flow", "en": "the body at work",
+                  "fa": "بدن در حال کار"}
+
+
+def _spec_seed(spec):
+    return int(hashlib.md5(spec.get("en", "").encode("utf-8")).hexdigest()[:8], 16)
+
+
+def _ease(u):
+    u = max(0.0, min(1.0, u))
+    return u * u * (3 - 2 * u)
+
+
+def _prim_flow(d, rect, p, t, seed):
+    """Particles streaming through a vessel, walls gently waving."""
+    x0, y0, x1, y1 = rect
+    w = x1 - x0
+    cy = (y0 + y1) / 2
+    hh = (y1 - y0) * 0.24
+    for sgn in (-1, 1):
+        pts = [(x, cy + sgn * hh + 7 * math.sin(x / 55.0 + t * 0.9
+                                                + (0 if sgn < 0 else 1.4)))
+               for x in range(x0, x1 + 1, 12)]
+        d.line(pts, fill=(236, 158, 158), width=5)
+    for k in range(3):  # chevrons riding the stream
+        cxp = x0 + ((k * w / 3 + t * 46) % w)
+        d.line([(cxp, cy - 13), (cxp + 15, cy), (cxp, cy + 13)], fill=GOLD, width=4)
+    cols = [(140, 228, 255), (255, 214, 120), (255, 170, 170), (170, 240, 190)]
+    rnd = random.Random(seed)
+    for i in range(26):
+        sp = rnd.uniform(34, 78)
+        lane = rnd.uniform(-hh + 16, hh - 16)
+        r = rnd.uniform(4, 7.5)
+        x = x0 - 16 + ((rnd.uniform(0, w + 32) + t * sp) % (w + 32))
+        yy = cy + lane + 6 * math.sin(x / 48.0 + i * 1.7)
+        d.ellipse([x - r, yy - r, x + r, yy + r], fill=cols[i % 4] + (235,),
+                  outline=WHITE + (160,), width=1)
+
+
+def _prim_exchange(d, rect, p, t, seed):
+    """Two compartments swapping molecules across a porous membrane."""
+    x0, y0, x1, y1 = rect
+    w, h = x1 - x0, y1 - y0
+    cx = (x0 + x1) / 2
+    d.rectangle([x0 + 6, y0 + 8, cx - 8, y1 - 8], fill=(70, 120, 200, 40))
+    d.rectangle([cx + 8, y0 + 8, x1 - 6, y1 - 8], fill=(90, 200, 130, 36))
+    seg = (y1 - y0 - 40) / 6
+    for i in range(6):
+        yy0 = y0 + 20 + i * seg
+        if i % 2 == 1:  # a pore, glowing gold
+            d.line([(cx, yy0 + seg * 0.3), (cx, yy0 + seg * 0.7)], fill=GOLD, width=6)
+        else:
+            d.line([(cx, yy0 + 3), (cx, yy0 + seg - 3)], fill=(200, 210, 240), width=5)
+    rnd = random.Random(seed)
+    for i in range(30):
+        left = i % 2 == 0
+        col = (140, 228, 255) if left else (255, 180, 90)
+        bx = rnd.uniform(x0 + 30, cx - 30) if left else rnd.uniform(cx + 30, x1 - 30)
+        by = rnd.uniform(y0 + 30, y1 - 30)
+        ph1, ph2 = rnd.uniform(0, 6.28), rnd.uniform(0, 6.28)
+        if i % 5 == 0:  # a crosser, swinging through a pore
+            bx = cx + math.sin(t * 0.45 + ph1) * w * 0.17
+            by = y0 + h * (0.3 + 0.2 * ((i // 5) % 3))
+        px = bx + 9 * math.sin(t * 1.25 + ph1)
+        py = by + 8 * math.cos(t * 1.6 + ph2)
+        d.ellipse([px - 6, py - 6, px + 6, py + 6], fill=col + (235,),
+                  outline=WHITE + (150,), width=1)
+
+
+def _prim_carrier(d, rect, p, t, seed):
+    """Carrier proteins ferrying molecules across a membrane, in cycle."""
+    x0, y0, x1, y1 = rect
+    w = x1 - x0
+    cy = (y0 + y1) / 2
+    d.rectangle([x0 + 14, cy - 15, x1 - 14, cy + 15], fill=(70, 90, 150, 160))
+    d.line([(x0 + 14, cy - 15), (x1 - 14, cy - 15)], fill=(236, 158, 158), width=3)
+    d.line([(x0 + 14, cy + 15), (x1 - 14, cy + 15)], fill=(236, 158, 158), width=3)
+    rnd = random.Random(seed)
+    for i in range(16):  # free molecules jiggling on both sides
+        top = i % 2 == 0
+        bx = rnd.uniform(x0 + 30, x1 - 30)
+        by = rnd.uniform(y0 + 24, cy - 46) if top else rnd.uniform(cy + 46, y1 - 24)
+        ph = rnd.uniform(0, 6.28)
+        px = bx + 8 * math.sin(t * 1.4 + ph)
+        py = by + 6 * math.cos(t * 1.1 + ph * 2)
+        d.ellipse([px - 5, py - 5, px + 5, py + 5], fill=(170, 240, 190, 220))
+    for ci in range(3):  # three carriers, staggered cycles
+        cxp = x0 + w * (0.25 + 0.25 * ci)
+        u = (t * 0.22 + ci * 0.37) % 1.0
+        d.rounded_rectangle([cxp - 27, cy - 24, cxp + 27, cy + 24], radius=10,
+                            fill=(96, 64, 148, 255), outline=WHITE, width=2)
+        my = None
+        if u < 0.45:  # open upward; a molecule descends into the carrier
+            d.polygon([(cxp - 11, cy - 24), (cxp + 11, cy - 24), (cxp, cy - 6)],
+                      fill=BG + (255,))
+            my = cy - 64 + 40 * _ease(u / 0.45)
+        elif u < 0.6:  # bound inside while the carrier flips
+            d.ellipse([cxp - 7, cy - 7, cxp + 7, cy + 7], fill=GOLD + (255,))
+        elif u < 0.9:  # open downward; the molecule is released below
+            d.polygon([(cxp - 11, cy + 24), (cxp + 11, cy + 24), (cxp, cy + 6)],
+                      fill=BG + (255,))
+            my = cy + 24 + 36 * _ease((u - 0.6) / 0.3)
+        if my is not None:
+            d.ellipse([cxp - 7, my - 7, cxp + 7, my + 7],
+                      fill=(140, 228, 255, 255), outline=WHITE, width=1)
+
+
+def _prim_levels(d, rect, p, t, seed):
+    """Three tanks whose levels rise and fall, out of phase."""
+    x0, y0, x1, y1 = rect
+    w = x1 - x0
+    base = y1 - 26
+    top = y0 + 34
+    cols = [(140, 228, 255), (255, 180, 90), (170, 240, 190)]
+    tw = min(120.0, w / 4.2)
+    for i in range(3):
+        tx0 = x0 + w * (0.16 + 0.27 * i)
+        tx1 = tx0 + tw
+        d.rounded_rectangle([tx0, top, tx1, base], radius=8,
+                            outline=(200, 215, 245), width=3)
+        frac = 0.45 + 0.28 * math.sin(t * 0.55 + i * 2.1) \
+            + 0.12 * math.sin(p * 6.28 + i)
+        frac = max(0.1, min(0.9, frac))
+        ly = base - (base - top) * frac
+        d.rectangle([tx0 + 4, ly, tx1 - 4, base - 4], fill=cols[i] + (150,))
+        wave = [(x, ly + 3 * math.sin(x / 16.0 + t * 2.2 + i))
+                for x in range(int(tx0) + 4, int(tx1) - 3, 8)]
+        d.line(wave, fill=cols[i] + (255,), width=3)
+        axp = (tx0 + tx1) / 2
+        if math.cos(t * 0.55 + i * 2.1) > 0:  # currently rising
+            d.polygon([(axp, top - 20), (axp - 8, top - 6), (axp + 8, top - 6)],
+                      fill=GOLD)
+        else:  # currently falling
+            d.polygon([(axp, top - 6), (axp - 8, top - 20), (axp + 8, top - 20)],
+                      fill=GOLD)
+    d.line([(x0 + 10, base), (x1 - 10, base)], fill=(200, 215, 245), width=2)
+
+
+def _prim_assemble(d, rect, p, t, seed):
+    """Scattered units drift together and link into a larger structure."""
+    x0, y0, x1, y1 = rect
+    w, h = x1 - x0, y1 - y0
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    rnd = random.Random(seed)
+    n = 18
+    units = []
+    for i in range(n):
+        ang = rnd.uniform(0, 6.283)
+        rad = math.sqrt(rnd.uniform(0.05, 1.0))
+        txp = cx + math.cos(ang) * rad * w * 0.30
+        typ = cy + math.sin(ang) * rad * h * 0.30
+        sxp = x0 + rnd.uniform(20, w - 20)
+        syp = y0 + rnd.uniform(16, h - 16)
+        units.append((sxp, syp, txp, typ, rnd.uniform(11, 17),
+                      rnd.choice([(70, 120, 190), (80, 150, 120),
+                                  (110, 130, 200), (90, 160, 170)]),
+                      rnd.uniform(0, 6.28)))
+    u = _ease(min(1.0, p * 1.5))
+    pos = []
+    for (sxp, syp, txp, typ, r, col, ph) in units:
+        px = sxp + (txp - sxp) * u + 2.0 * math.sin(t * 1.3 + ph)
+        py = syp + (typ - syp) * u + 2.0 * math.cos(t * 1.1 + ph)
+        pos.append((px, py, r, col))
+    if p > 0.55:  # the mortar: links between neighbours fade in
+        a = int(200 * min(1.0, (p - 0.55) / 0.3))
+        for i in range(n):
+            for j in range(i + 1, n):
+                if math.hypot(pos[i][0] - pos[j][0], pos[i][1] - pos[j][1]) < 86:
+                    d.line([pos[i][:2], pos[j][:2]], fill=GOLD + (a,), width=2)
+    for (px, py, r, col) in pos:
+        d.ellipse([px - r, py - r, px + r, py + r], fill=col + (255,),
+                  outline=(200, 215, 245), width=1)
+        d.ellipse([px - 3.5, py - 3.5, px + 3.5, py + 3.5], fill=(40, 34, 84, 255))
+    if p > 0.85:  # the finished structure is outlined in gold
+        d.ellipse([cx - w * 0.36, cy - h * 0.36, cx + w * 0.36, cy + h * 0.36],
+                  outline=GOLD, width=3)
+
+
+def _prim_cycle(d, rect, p, t, seed):
+    """A bright marker travelling around a loop; nodes light as it passes."""
+    x0, y0, x1, y1 = rect
+    w, h = x1 - x0, y1 - y0
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    R = min(w, h) * 0.34
+    ring = [(cx + R * math.cos(a), cy + R * math.sin(a))
+            for a in [i * 0.05 for i in range(126)]]
+    d.line(ring + [ring[0]], fill=(150, 180, 230), width=3)
+    theta = -t * 0.55  # clockwise
+    for k in range(4):
+        a = -math.pi / 2 + k * math.pi / 2
+        nx, ny = cx + R * math.cos(a), cy + R * math.sin(a)
+        diff = abs((theta - a + math.pi) % (2 * math.pi) - math.pi)
+        lit = diff < 0.55
+        d.ellipse([nx - 17, ny - 17, nx + 17, ny + 17],
+                  fill=GOLD if lit else CARD, outline=WHITE, width=2)
+        s = str(k + 1)
+        tw_ = d.textlength(s, font=F("en_b", 19))
+        d.text((nx - tw_ / 2, ny - 12), s, font=F("en_b", 19),
+               fill=BG if lit else WHITE)
+    for back in range(5):  # the marker and its fading trail
+        a = theta + back * 0.16
+        mx, my = cx + R * math.cos(a), cy + R * math.sin(a)
+        r = 10 - back * 1.5
+        d.ellipse([mx - r, my - r, mx + r, my + r],
+                  fill=(255, 214, 120, 255 - back * 45))
+    for k in range(2):  # small orbiters near the centre
+        a = t * (0.8 + 0.4 * k) + k * 3.1
+        mx = cx + (R * 0.38) * math.cos(a)
+        my = cy + (R * 0.38) * math.sin(a)
+        d.ellipse([mx - 6, my - 6, mx + 6, my + 6], fill=(140, 228, 255, 230))
+
+
+def _prim_cell(d, rect, p, t, seed):
+    """A living cell: pulsing nucleus, drifting particles, membrane traffic."""
+    x0, y0, x1, y1 = rect
+    w, h = x1 - x0, y1 - y0
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    rx, ry = w * 0.40, h * 0.38
+    d.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=(33, 56, 104, 255),
+              outline=(240, 200, 90), width=4)
+    d.ellipse([cx - rx + 10, cy - ry + 10, cx + rx - 10, cy + ry - 10],
+              outline=(150, 180, 230), width=2)
+    nr = rx * 0.30 * (1 + 0.05 * math.sin(t * 2.0))  # pulsing nucleus
+    nx, ny = cx - rx * 0.25, cy
+    d.ellipse([nx - nr, ny - nr * 0.8, nx + nr, ny + nr * 0.8],
+              fill=(96, 64, 148, 255), outline=WHITE, width=2)
+    for (fx, fy) in [(-0.45, -0.45), (0.35, 0.5), (0.55, -0.35)]:  # mitochondria
+        mx = cx + fx * rx
+        my = cy + fy * ry + 4 * math.sin(t * 1.6 + fx * 9)
+        d.ellipse([mx - 26, my - 12, mx + 26, my + 12], fill=(206, 122, 54, 255),
+                  outline=(250, 200, 140), width=2)
+        d.line([(mx - 16, my), (mx - 5, my - 5), (mx + 5, my + 5), (mx + 16, my)],
+               fill=(250, 220, 170), width=2)
+    rnd = random.Random(seed)
+    for i in range(22):  # cytoplasm particles drifting inside the cell
+        ph1, ph2 = rnd.uniform(0, 6.28), rnd.uniform(0, 6.28)
+        sp1, sp2 = rnd.uniform(0.25, 0.6), rnd.uniform(0.2, 0.5)
+        px = cx + rx * 0.62 * math.sin(ph1 + t * sp1)
+        py = cy + ry * 0.62 * math.sin(ph2 + t * sp2)
+        d.ellipse([px - 3.5, py - 3.5, px + 3.5, py + 3.5],
+                  fill=(250, 230, 150, 235))
+    for i in range(5):  # molecules crossing the membrane, in and out
+        a = i * 1.256 + 0.4
+        dist = 0.55 + 0.75 * (0.5 + 0.5 * math.sin(t * 0.6 + i * 1.7))
+        px = cx + math.cos(a) * rx * dist
+        py = cy + math.sin(a) * ry * dist
+        d.ellipse([px - 5, py - 5, px + 5, py + 5], fill=(140, 228, 255, 240),
+                  outline=WHITE, width=1)
+    labels = [("membrane", cx + rx * 0.30, cy - ry + 10),
+              ("nucleus", nx, ny - rx * 0.30 * 0.8 - 24),
+              ("mitochondria", cx + rx * 0.35, cy + ry * 0.5 + 20)]
+    for i, (txt, lx, ly) in enumerate(labels):
+        if p < 0.25 + i * 0.25:
+            continue
+        tw_ = d.textlength(txt, font=F("en_r", 16))
+        d.text((lx - tw_ / 2, ly), txt, font=F("en_r", 16), fill=(200, 220, 255))
+
+
+def _prim_compare(d, rect, p, t, seed):
+    """Two sides with clearly different amounts/activity, split by a divider."""
+    x0, y0, x1, y1 = rect
+    w, h = x1 - x0, y1 - y0
+    cx = (x0 + x1) / 2
+    more_right = seed % 2 == 0
+    midy = (y0 + y1) / 2
+    d.line([(cx, y0 + 12), (cx, y1 - 40)], fill=GOLD, width=3)
+    d.ellipse([cx - 17, midy - 17, cx + 17, midy + 17], fill=CARD,
+              outline=GOLD, width=2)
+    tw_ = d.textlength("vs", font=F("en_b", 16))
+    d.text((cx - tw_ / 2, midy - 11), "vs", font=F("en_b", 16), fill=GOLD)
+    rnd = random.Random(seed)
+    for side in (0, 1):
+        sx0 = x0 + 10 if side == 0 else cx + 12
+        sx1 = cx - 12 if side == 0 else x1 - 10
+        busy = (side == 1) == more_right
+        n = 20 if busy else 7
+        sp_mul = 2.2 if busy else 0.7
+        col = (255, 214, 120) if busy else (140, 170, 220)
+        for i in range(n):
+            bx = rnd.uniform(sx0 + 14, sx1 - 14)
+            by = rnd.uniform(y0 + 20, y1 - 66)
+            ph = rnd.uniform(0, 6.28)
+            px = bx + 12 * math.sin(t * sp_mul * 0.8 + ph)
+            py = by + 9 * math.cos(t * sp_mul * 0.6 + ph * 1.3)
+            px = max(sx0 + 6, min(sx1 - 6, px))
+            d.ellipse([px - 5, py - 5, px + 5, py + 5], fill=col + (235,))
+        lvl = (0.78 if busy else 0.3) + 0.05 * math.sin(t * 1.3 + side * 2.0)
+        d.rectangle([sx0, y1 - 34, sx0 + (sx1 - sx0) * lvl, y1 - 18],
+                    fill=col + (170,))
+        d.rectangle([sx0, y1 - 34, sx1, y1 - 18], outline=(200, 215, 245), width=1)
+
+
+_PRIMS = {"flow": _prim_flow, "exchange": _prim_exchange,
+          "carrier": _prim_carrier, "levels": _prim_levels,
+          "assemble": _prim_assemble, "cycle": _prim_cycle,
+          "cell": _prim_cell, "compare": _prim_compare}
+
+
+def draw_visual(d, rect, spec, p, t):
+    _PRIMS.get(spec.get("kind"), _prim_flow)(d, rect, p, t, _spec_seed(spec))
+
+
+def draw_panel_en(d, rect, head, body, p):
+    """The alongside panel for English text: progressive word reveal."""
+    x0, y0, x1, y1 = rect
+    d.rounded_rectangle([x0, y0, x1, y1], radius=16, fill=CARD,
+                        outline=GOLD, width=2)
+    yy = y0 + 14
+    if head:
+        hw = d.textlength(head, font=F("en_b", 20))
+        d.text(((x0 + x1 - hw) / 2, yy), head, font=F("en_b", 20), fill=GOLD)
+        yy += 32
+    lines = wrap_ltr(body, F("en_r", 20), (x1 - x0) - 30)
+    words_total = sum(len(ln.split()) for ln in lines)
+    reveal = int(words_total * min(1.0, p * 1.12))
+    seen, last_idx = 0, -1
+    for li, ln in enumerate(lines):
+        if seen >= reveal:
+            break
+        last_idx = li
+        seen += len(ln.split())
+    if last_idx < 0:
+        return
+    max_lines = max(1, (y1 - yy - 10) // 26)
+    start = max(0, last_idx - max_lines + 1)  # slide the window when full
+    seen = sum(len(ln.split()) for ln in lines[:start])
+    for li in range(start, last_idx + 1):
+        ln = lines[li]
+        lw = len(ln.split())
+        txt = ln if seen + lw <= reveal else " ".join(ln.split()[: reveal - seen])
+        d.text((x0 + 15, yy), txt, font=F("en_r", 20), fill=WHITE)
+        seen += lw
+        yy += 26
+
+
+def draw_panel_fa(d, rect, title, body, p):
+    """The alongside panel for Persian text: progressive line reveal."""
+    x0, y0, x1, y1 = rect
+    d.rounded_rectangle([x0, y0, x1, y1], radius=16, fill=CARD,
+                        outline=GOLD, width=2)
+    yy = y0 + 12
+    if title:
+        yy = center_fa(d, yy, title, F("fa_b", 21), GOLD,
+                       maxw=(x1 - x0) - 30, right=x1 - 15)
+        yy += 4
+    raw = []
+    for ln in body.split("\n"):
+        ln = ln.strip().lstrip("-• ").strip()
+        if ln:
+            raw.extend(wrap_fa(ln, F("fa_r", 21), (x1 - x0) - 30))
+    if not raw:
+        return
+    max_lines = max(1, (y1 - yy - 10) // 30)
+    n_show = max(1, int(len(raw) * min(1.0, p * 1.12)))
+    start = max(0, n_show - max_lines)  # slide the window when full
+    for ln in raw[start:n_show]:
+        draw_fa(d, (x1 - 15, yy), ln, F("fa_r", 21), WHITE, anchor="ra")
+        yy += 30
+
+
+def _center_fa_line(d, cxm, y, text, font, fill):
+    w_ = _len(text, font, fa=True)
+    draw_fa(d, (cxm - w_ / 2, y), text, font, fill, anchor="la")
+
+
+def paint_visual(p, t, dur, bottom, step_label, title_en, title_fa,
+                 spec, panel_kind, panel_head, panel_body):
+    """One cinematic content scene: animated subject matter on the left,
+    the accompanying text in a panel on the right, caption under the
+    stage naming what is moving (EN + FA)."""
+    img, d = slide_base()
+    y = header(d, step_label, title_en, title_fa)
+    top = y + 2
+    bot = bottom - 6
+    panel_rect = (PANEL_X0, top, PANEL_X1, bot)
+    if panel_kind == "en":
+        draw_panel_en(d, panel_rect, panel_head, panel_body, p)
+    else:
+        draw_panel_fa(d, panel_rect, panel_head, panel_body, p)
+    cap_y = bot - 52
+    anim_rect = (ANIM_X0, top, ANIM_X1, cap_y - 6)
+    d.rounded_rectangle([anim_rect[0] - 6, anim_rect[1] - 4,
+                         anim_rect[2] + 6, anim_rect[3] + 4],
+                        radius=14, outline=(90, 110, 170), width=2)
+    draw_visual(d, anim_rect, spec, p, t)
+    if p > 0.03:  # caption naming the moving elements, fading in
+        a = min(1.0, (p - 0.03) / 0.15)
+        cxm = (ANIM_X0 + ANIM_X1) / 2
+        en = spec.get("en", "")
+        tw_ = d.textlength(en, font=F("en_b", 20))
+        d.text((cxm - tw_ / 2, cap_y), en, font=F("en_b", 20),
+               fill=_fade(GOLD, BG, a))
+        _center_fa_line(d, cxm, cap_y + 27, spec.get("fa", ""),
+                        F("fa_r", 19), _fade(LIGHT, BG, a))
+    return img
+
+
+def draw_ambient(d, t, bottom, seed=99, n=42):
+    """Slowly drifting particles behind the title/closing cards, so even
+    those frames are alive (first second to last)."""
+    rnd = random.Random(seed)
+    for i in range(n):
+        bx = rnd.uniform(0, W)
+        by = rnd.uniform(0, max(1, bottom))
+        sp = rnd.uniform(6, 20)
+        r = rnd.uniform(1.6, 3.6)
+        x = (bx + t * sp) % W
+        yy = (by - t * sp * 0.4) % max(1, bottom)
+        d.ellipse([x - r, yy - r, x + r, yy + r], fill=(150, 190, 255, 90))
 
 
 # ------------------------------------------- matplotlib step diagrams
@@ -1178,8 +1663,9 @@ def paint_quiz(p, bottom, n, q_fa, a_fa, answer_start):
     return img
 
 
-def paint_closing(p, bottom, printed_page):
+def paint_closing(p, bottom, printed_page, t=0.0):
     img, d = slide_base()
+    draw_ambient(d, t, bottom, seed=7)
     mid = bottom // 2
     if p > 0.05:
         center_text(d, mid - 120, "END OF THE LESSON", F("en_b", 38),
@@ -1227,13 +1713,26 @@ def build_scenes(content, english_paras, translation_paras, page_png,
        (f"Today's lesson is printed page {printed_page}. We go step by step: "
         "the page, its exact words, the translation, the explanation, and a quiz.",
         f"درس امروز: صفحهٔ چاپی {printed_page} — گام‌به‌گام")],
-      lambda p, t, dur, bottom, fr: paint_title(p, bottom, printed_page),
+      lambda p, t, dur, bottom, fr: paint_title(p, bottom, printed_page, t),
       min_dur=6.0)
 
     S([("First, look at the real page of the book. The highlight travels "
         "over the page we are studying today.", "گام یکم: خود صفحهٔ کتاب")],
       lambda p, t, dur, bottom, fr: paint_page(p, bottom, page_png),
       min_dur=7.0)
+
+    # CINEMATIC CONTENT ANIMATION: each paragraph/point is paired with
+    # its visual spec (validated upstream); the animation is the scene's
+    # main visual and the text accompanies it in the alongside panel.
+    visuals = content.get("visuals") or {}
+    para_visuals = visuals.get("paragraphs") or []
+    point_visuals = visuals.get("points") or []
+
+    def para_spec(i):
+        return para_visuals[i] if i < len(para_visuals) else DEFAULT_VISUAL
+
+    def point_spec(j):
+        return point_visuals[j] if j < len(point_visuals) else DEFAULT_VISUAL
 
     for i, para in enumerate(english_paras):
         head, body = detect_head(para)
@@ -1244,16 +1743,24 @@ def build_scenes(content, english_paras, translation_paras, page_png,
             cues.append((sent, fa))
         if not cues:
             continue
-        S(cues, lambda p, t, dur, bottom, fr, i=i, head=head, body=body:
-          paint_text_para(p, bottom, i, head, body), min_dur=3.0)
+        spec = para_spec(i)
+        S(cues, lambda p, t, dur, bottom, fr, i=i, head=head, body=body,
+          spec=spec:
+          paint_visual(p, t, dur, bottom, "STEP 2 — THE BOOK'S EXACT WORDS",
+                       f"Paragraph {i + 1}", None, spec, "en", head, body),
+          min_dur=3.0)
 
     for i, fa_para in enumerate(translation_paras):
-        n_lines = max(1, len(wrap_fa(fa_para, F("fa_r", 26), 1020)))
+        n_lines = max(1, len(wrap_fa(fa_para, F("fa_r", 21),
+                                     PANEL_X1 - PANEL_X0 - 30)))
+        spec = para_spec(i)
         S([(f"Now, the Persian translation of paragraph {i + 1}.",
             f"ترجمهٔ فارسی — پاراگراف {i + 1}")],
-          lambda p, t, dur, bottom, fr, i=i, fa_para=fa_para:
-          paint_translation(p, bottom, i, fa_para),
-          min_dur=1.6 + 1.15 * n_lines)
+          lambda p, t, dur, bottom, fr, i=i, fa_para=fa_para, spec=spec:
+          paint_visual(p, t, dur, bottom, "STEP 3 — PERSIAN TRANSLATION",
+                       f"Translation — paragraph {i + 1}", "ترجمهٔ فارسی",
+                       spec, "fa", None, fa_para),
+          min_dur=2.0 + 0.8 * n_lines)
 
     points = split_explanation_points(content["explanation_fa"])
     summaries = content["explanation_summaries_en"]
@@ -1298,8 +1805,14 @@ def build_scenes(content, english_paras, translation_paras, page_png,
     for j, (title_fa, body_fa) in enumerate(points):
         summary = summaries[j] if j < len(summaries) else f"Explanation, part {j + 1}."
         cues = [(s, title_fa) for s in split_sentences(summary)] or [(summary, title_fa)]
-        S(cues, lambda p, t, dur, bottom, fr, title_fa=title_fa, body_fa=body_fa:
-          paint_explain(p, bottom, title_fa, body_fa), min_dur=4.0)
+        spec = point_spec(j)
+        n_panel = max(1, len(wrap_fa(body_fa, F("fa_r", 21),
+                                     PANEL_X1 - PANEL_X0 - 30)))
+        S(cues, lambda p, t, dur, bottom, fr, title_fa=title_fa,
+          body_fa=body_fa, spec=spec:
+          paint_visual(p, t, dur, bottom, "STEP 4 — EXPLANATION",
+                       "Explanation", "شرح درس", spec, "fa", title_fa, body_fa),
+          min_dur=max(4.0, min(26.0, 0.5 * n_panel)))
         diagram_after(j)
     if not points:
         diagram_after(0)
@@ -1317,7 +1830,7 @@ def build_scenes(content, english_paras, translation_paras, page_png,
 
     S([(f"That was printed page {printed_page}. In the next lesson, we continue "
         f"with printed page {printed_page + 1}.", "پایان درس")],
-      lambda p, t, dur, bottom, fr: paint_closing(p, bottom, printed_page),
+      lambda p, t, dur, bottom, fr: paint_closing(p, bottom, printed_page, t),
       min_dur=5.0)
     return scenes
 
