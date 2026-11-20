@@ -1159,8 +1159,11 @@ def draw_panel_en(d, rect, head, body, p):
                         outline=GOLD, width=2)
     yy = y0 + 14
     if head:
-        hw = d.textlength(head, font=F("en_b", 20))
-        d.text(((x0 + x1 - hw) / 2, yy), head, font=F("en_b", 20), fill=GOLD)
+        hsize = 20
+        while hsize > 13 and d.textlength(head, font=F("en_b", hsize)) > (x1 - x0) - 24:
+            hsize -= 2  # shrink a long heading until it fits the panel
+        hw = d.textlength(head, font=F("en_b", hsize))
+        d.text(((x0 + x1 - hw) / 2, yy), head, font=F("en_b", hsize), fill=GOLD)
         yy += 32
     lines = wrap_ltr(body, F("en_r", 20), (x1 - x0) - 30)
     words_total = sum(len(ln.split()) for ln in lines)
