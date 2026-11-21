@@ -286,7 +286,7 @@ def fa_kwargs():
 GEMINI_PROMPT = """You are the teaching brain of an autonomous physiology course based on Guyton and Hall, Textbook of Medical Physiology, 13th edition. Below is the EXACT English text of one printed page of the book (page {page}).
 
 Return ONLY a JSON object (no markdown, no extra text) with EXACTLY these keys:
-- "translation_fa": the COMPLETE Persian translation of the page text, faithful and fluent, paragraphs separated by \\n\\n. Keep section headings as their own paragraphs.
+- "translation_fa": the COMPLETE Persian translation of the page text, faithful and fluent, paragraphs separated by \\n\\n. Keep section headings as their own paragraphs. The page text below has EXACTLY {n_paras} paragraphs: your translation MUST have EXACTLY {n_paras} paragraphs too, in the same order — translate paragraph for paragraph; never split one paragraph into two and never merge two into one.
 - "explanation_fa": a detailed Persian explanation (شرح) that teaches this page step by step, section by section, following the page's own order. Use ### headings for sub-sections. Every technical term is explained at its first use, with the English term in parentheses, e.g. سلول (Cell). Write for a medical student; be thorough but clear. THE SHARH METHOD (mandatory — see SHARH_METHOD.md and SOURCES.md in this repository): write this شرح the way the world's best physiology teachers teach, in the combined tradition of the 100 collected university and lecture sources (Guyton-based university handouts, TeachMePhysiology, OpenStax, LibreTexts, Ninja Nerd, Dr Najeeb, Armando Hasudungan, Medical Gateway and the rest of SOURCES.md). Rules: (1) ONE COHERENT LESSON — the شرح is a single connected, flowing lesson, never disconnected notes: each section links back to the previous section and points forward to the next, so the whole page reads as one story with a beginning and an end. (2) PARAGRAPH BY PARAGRAPH — EVERY paragraph of the page gets its OWN ### section, in the page's exact order; never merge two paragraphs into one section, never skip a paragraph, and if the page continues a paragraph from the previous page, say so and complete its idea. (3) COMPLETE AND PRECISE — every fact, number, thickness, percentage and name in the paragraph is explained, not merely repeated: state what each number means, compare it with something familiar, and say why it matters physiologically; every mechanism is broken into its small steps in order. (4) A FLUENT EXAMPLE FOR EVERY PARAGRAPH — each section contains at least one concrete, vivid example from everyday life or the clinic, introduced with «مثال:», in the manner of the great lecture teachers: first the analogy or the living picture, then the exact mechanism it stands for. (5) MECHANISM BEFORE MEMORY — always explain HOW and WHY a process happens before naming anything to be memorised, and end each section with one short line beginning «جمع‌بندی:» that states the single idea the student must carry away from that paragraph. (6) HUMAN, WARM AND FLUENT — natural flowing Persian, as a kind teacher speaking to one student; short clear sentences; a guiding question to the reader now and then («حالا فکر کن...»); no dry list-of-facts style. Stay faithful to the page and to standard physiology: never invent numbers, names or mechanisms the page does not support. (7) DOCUMENTED — EVERY ### section ENDS with a sources line beginning «منابع این بخش:» citing (a) this book — Guyton and Hall, Textbook of Medical Physiology, 13th edition, with its chapter and the printed page being taught — and (b) at least one supporting teaching source from SOURCES.md whose teaching that section's explanation or example follows, named exactly as listed there, with its chapter, section or page whenever that is genuinely known. NEVER invent a page number, a chapter number or a link: when the exact page of a supporting source is not known, cite its chapter or topic title instead of a page. Every claim in a section must be traceable to the book page itself or to one of the sources cited under it.
 - "explanation_summaries_en": a list of short English summaries (1-2 simple sentences each), ONE per ### section of explanation_fa, in the same order. These are spoken aloud in the lesson film.
 - "categories": if the page contains a clear categorisation or list (for example the branches of a science, types of something), an object {{"title_en": "...", "title_fa": "...", "items": [{{"en": "...", "fa": "..."}}]}} with 3-10 items; otherwise null.
@@ -300,6 +300,25 @@ PAGE TEXT:
 """
 
 
+def _validate_alignment(data, n_paragraphs):
+    """Live-path alignment checks. The film renderer walks the Persian
+    translation paragraphs and the شرح sections in lockstep with the
+    per-paragraph / per-point animation specs, so their counts must match
+    the page's paragraph count and each other exactly (fail-closed)."""
+    n_trans = len([p for p in str(data["translation_fa"]).split("\n\n")
+                   if p.strip()])
+    if n_trans != n_paragraphs:
+        raise Fail(f"translation_fa has {n_trans} paragraphs, expected "
+                   f"exactly {n_paragraphs} (one per page paragraph, "
+                   f"in the same order)")
+    n_points = len(split_explanation_points(str(data["explanation_fa"])))
+    if n_points != len(data["explanation_summaries_en"]):
+        raise Fail(f"explanation_fa has {n_points} sections but "
+                   f"explanation_summaries_en has "
+                   f"{len(data['explanation_summaries_en'])} entries "
+                   f"(must match one to one)")
+
+
 def call_gemini(page_text, printed_page):
     api_key = os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
@@ -308,27 +327,50 @@ def call_gemini(page_text, printed_page):
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"{model}:generateContent")
     n_paras = len([p for p in page_text.split("\n\n") if p.strip()])
-    body = {
-        "contents": [{"parts": [{"text": GEMINI_PROMPT.format(
-            page=printed_page, text=page_text, n_paras=n_paras)}]}],
-        "generationConfig": {"responseMimeType": "application/json",
-                             "temperature": 0.4},
-    }
-    try:
-        r = requests.post(url, data=json.dumps(body),
-                          headers={"Content-Type": "application/json",
-                                   "x-goog-api-key": api_key}, timeout=600)
-    except Exception as e:
-        raise Fail(f"Gemini API call failed: {e}")
-    if r.status_code != 200:
-        raise Fail(f"Gemini API HTTP {r.status_code}: {r.text[:300]}")
-    try:
-        resp = r.json()
-        text = resp["candidates"][0]["content"]["parts"][0]["text"]
-        data = json.loads(text)
-    except Exception as e:
-        raise Fail(f"Gemini reply is not valid JSON: {e}")
-    return validate_content(data, n_paragraphs=n_paras)
+    base_prompt = GEMINI_PROMPT.format(
+        page=printed_page, text=page_text, n_paras=n_paras)
+    prompt = base_prompt
+    last_err = None
+    for attempt in range(1, 4):
+        body = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"responseMimeType": "application/json",
+                                 "temperature": 0.4},
+        }
+        try:
+            r = requests.post(url, data=json.dumps(body),
+                              headers={"Content-Type": "application/json",
+                                       "x-goog-api-key": api_key}, timeout=600)
+        except Exception as e:
+            raise Fail(f"Gemini API call failed: {e}")
+        if r.status_code != 200:
+            raise Fail(f"Gemini API HTTP {r.status_code}: {r.text[:300]}")
+        try:
+            resp = r.json()
+            text = resp["candidates"][0]["content"]["parts"][0]["text"]
+            data = json.loads(text)
+            validate_content(data, n_paragraphs=n_paras)
+            _validate_alignment(data, n_paras)
+            return data
+        except Fail as e:
+            last_err = e
+        except Exception as e:
+            last_err = Fail(f"Gemini reply is not valid JSON: {e}")
+        log(f"Gemini attempt {attempt} rejected: {last_err}; retrying "
+            f"with the error fed back")
+        prompt = (base_prompt +
+                  f"\n\nIMPORTANT — your previous reply was REJECTED for "
+                  f"this reason: {last_err}. Return the COMPLETE "
+                  f"corrected JSON object. Before answering, count "
+                  f"carefully: the page text has exactly {n_paras} "
+                  f"paragraphs; translation_fa must have exactly "
+                  f"{n_paras} paragraphs in the same order; "
+                  f"visuals.paragraphs must have exactly {n_paras} "
+                  f"items; and the ### sections of explanation_fa, the "
+                  f"explanation_summaries_en entries and visuals.points "
+                  f"must all have the same count, in the same order.")
+    raise Fail(f"Gemini content failed validation after 3 attempts: "
+               f"{last_err}")
 
 
 # Animation kinds the film renderer actually implements. Gemini must pick
