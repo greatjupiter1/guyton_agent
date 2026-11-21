@@ -2063,13 +2063,14 @@ def send_lesson(token, chat_id, printed_page, page_png, english_text,
         msg(chunk)
     for chunk in split_text("📚 شرح\n\n" + content["explanation_fa"]):
         msg(chunk)
-    with open(film_path, "rb") as f:
-        tg_call("sendVideo", token,
-                {"chat_id": chat_id,
-                 "caption": f"🎬 Teaching film — printed page {printed_page}",
-                 "supports_streaming": "true"},
-                files={"video": f})
-    time.sleep(1)
+    if film_path:
+        with open(film_path, "rb") as f:
+            tg_call("sendVideo", token,
+                    {"chat_id": chat_id,
+                     "caption": f"🎬 Teaching film — printed page {printed_page}",
+                     "supports_streaming": "true"},
+                    files={"video": f})
+        time.sleep(1)
     quiz_text = "📝 آزمون\n\n" + "\n\n".join(
         f"سؤال {i + 1}: {q['q_fa']}" for i, q in enumerate(content["quiz"]))
     for chunk in split_text(quiz_text):
@@ -2122,11 +2123,21 @@ def main():
         with open(os.path.join(OUT, "lesson.md"), "w", encoding="utf-8") as f:
             f.write(lesson_md)
 
-        scenes = build_scenes(content, english_paras, translation_paras,
-                              page_png, printed_page,
-                              keyword_text=page_text.lower())
-        film_path = os.path.join(OUT, "film.mp4")
-        render_film(scenes, film_path)
+        content_only = os.environ.get("CONTENT_ONLY", "").lower() in (
+            "1", "true", "yes")
+        if content_only:
+            # Jupiter's order: send the lesson content now, the film is
+            # deferred until he asks for it. The state still advances —
+            # the page's content has been taught; only the film is owed.
+            film_path = None
+            log("CONTENT_ONLY: sending page, text, translation, شرح and "
+                "quiz WITHOUT the film (film deferred)")
+        else:
+            scenes = build_scenes(content, english_paras, translation_paras,
+                                  page_png, printed_page,
+                                  keyword_text=page_text.lower())
+            film_path = os.path.join(OUT, "film.mp4")
+            render_film(scenes, film_path)
 
         if args.dry_run:
             log("DRY-RUN complete: out/page.png, out/lesson.md, out/film.mp4 "
