@@ -340,8 +340,22 @@ def call_gemini(page_text, printed_page):
         try:
             r = requests.post(url, data=json.dumps(body),
                               headers={"Content-Type": "application/json",
-                                       "x-goog-api-key": api_key}, timeout=600)
+                                       "x-goog-api-key": api_key}, timeout=180)
         except Exception as e:
+            # Transport failure (read timeout, connection reset, DNS):
+            # Gemini may simply be slow or unreachable for a moment —
+            # retry it like a transient HTTP error instead of failing
+            # the whole run. (Run 44892563881 died here: attempt 1 got
+            # a 503, attempt 2 hung for the full old 600s read timeout
+            # and the run failed closed with nothing sent.)
+            if attempt < 6:
+                last_err = Fail(f"Gemini API call failed: {e}")
+                wait = 30 * attempt
+                log(f"Gemini attempt {attempt}: transport error "
+                    f"({type(e).__name__}: {e}); waiting {wait}s "
+                    f"and retrying")
+                time.sleep(wait)
+                continue
             raise Fail(f"Gemini API call failed: {e}")
         if r.status_code != 200:
             err = Fail(f"Gemini API HTTP {r.status_code}: {r.text[:300]}")
