@@ -45,6 +45,16 @@ Not a dry summary of the book: a complete, human, fluent lesson.
 7. **امانت (Fidelity).** Stay faithful to the page and to standard
    physiology. Never invent numbers, names or mechanisms the page does
    not support.
+8. **مستند (Documented) — added by Jupiter, 2026-11-21.** EVERY section
+   of the شرح ends with a sources line beginning «منابع این بخش:» that
+   cites (a) this book — Guyton and Hall, 13th edition, with chapter and
+   the printed page being taught — and (b) at least one supporting
+   teaching source from `SOURCES.md` whose teaching that section's
+   explanation or example follows, named exactly, with its chapter,
+   section or page whenever genuinely known. NEVER invent a page number,
+   chapter or link: if the exact page is not known, cite the chapter or
+   topic title instead. Every claim in a section must be traceable to
+   the book page or to one of its cited sources.
 
 ## نمونهٔ تأییدشده — The approved sample
 
