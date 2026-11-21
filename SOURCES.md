@@ -144,3 +144,27 @@ tradition of these sources — see `SHARH_METHOD.md`. The book page itself
     https://www.amss.org.au/education/education-resources
 100. Respiratory physiology lecture notes — SlideShare —
      https://www.slideshare.net/slideshow/respiration-physioloy-lectures-note-pptx/280556824
+
+## Theses & academic papers (16)
+
+101. PubMed Central (PMC) — free full-text archive of biomedical and
+     physiology literature (U.S. National Library of Medicine)
+102. PubMed — biomedical literature database (NLM)
+103. Annual Review of Physiology (Annual Reviews)
+104. Physiological Reviews (American Physiological Society)
+105. Advances in Physiology Education (American Physiological Society)
+106. Journal of Applied Physiology (American Physiological Society)
+107. American Journal of Physiology — journal family (American
+     Physiological Society)
+108. Physiology — the APS magazine-journal of function
+109. The FASEB Journal (Federation of American Societies for
+     Experimental Biology)
+110. bioRxiv — preprint server for biology (Cold Spring Harbor
+     Laboratory)
+111. medRxiv — preprint server for health sciences (CSHL / BMJ / Yale)
+112. ProQuest Dissertations & Theses Global
+113. MIT DSpace — theses repository
+114. Harvard DASH — theses and articles repository
+115. EThOS — British Library E-Theses Online Service
+116. Open Access Theses and Dissertations (OATD.org) — international
+     theses aggregator; DART-Europe E-theses Portal
