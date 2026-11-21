@@ -5,7 +5,12 @@ name: Build Guyton lesson
 # (Actions tab -> Run workflow), or by the Cloudflare daily-post-agent via
 # repository_dispatch with type "build-guyton-lesson".
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      content_only:
+        description: "Send the lesson content (page, text, translation, شرح, quiz) WITHOUT the film"
+        type: boolean
+        default: false
   repository_dispatch:
     types: [build-guyton-lesson]
   schedule:
@@ -50,6 +55,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+          CONTENT_ONLY: ${{ inputs.content_only }}
         run: python build_lesson.py
 
       - name: Save progress (advance state.json)
