@@ -331,7 +331,7 @@ def call_gemini(page_text, printed_page):
         page=printed_page, text=page_text, n_paras=n_paras)
     prompt = base_prompt
     last_err = None
-    for attempt in range(1, 4):
+    for attempt in range(1, 7):
         body = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"responseMimeType": "application/json",
@@ -344,7 +344,17 @@ def call_gemini(page_text, printed_page):
         except Exception as e:
             raise Fail(f"Gemini API call failed: {e}")
         if r.status_code != 200:
-            raise Fail(f"Gemini API HTTP {r.status_code}: {r.text[:300]}")
+            err = Fail(f"Gemini API HTTP {r.status_code}: {r.text[:300]}")
+            if r.status_code in (429, 500, 502, 503, 504) and attempt < 6:
+                # Transient provider error (e.g. 503 high demand): wait
+                # and retry the same prompt inside this run.
+                last_err = err
+                wait = 30 * attempt
+                log(f"Gemini attempt {attempt}: transient HTTP "
+                    f"{r.status_code}; waiting {wait}s and retrying")
+                time.sleep(wait)
+                continue
+            raise err
         try:
             resp = r.json()
             text = resp["candidates"][0]["content"]["parts"][0]["text"]
@@ -369,7 +379,7 @@ def call_gemini(page_text, printed_page):
                   f"items; and the ### sections of explanation_fa, the "
                   f"explanation_summaries_en entries and visuals.points "
                   f"must all have the same count, in the same order.")
-    raise Fail(f"Gemini content failed validation after 3 attempts: "
+    raise Fail(f"Gemini content failed after repeated attempts: "
                f"{last_err}")
 
 
