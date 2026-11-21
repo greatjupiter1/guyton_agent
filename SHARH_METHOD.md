@@ -55,6 +55,23 @@ Not a dry summary of the book: a complete, human, fluent lesson.
    chapter or link: if the exact page is not known, cite the chapter or
    topic title instead. Every claim in a section must be traceable to
    the book page or to one of its cited sources.
+9. **سطحِ آغازین — برای خواننده‌ای که اولین بار می‌خواند (Beginner-first
+   level) — added by Jupiter, 2026-11-21.** Write EVERY شرح for a reader
+   who is meeting this material for the VERY FIRST TIME and knows
+   nothing in advance — not for a medical student who already knows the
+   basics. Keep the level of the material a step lower: short, simple
+   sentences; everyday words wherever an everyday word can carry the
+   meaning; one new idea at a time, in small steps. EVERY term is
+   explained at its first appearance in simple, fluent words — the
+   specialised technical terms AND ordinary terms, English loanwords and
+   abbreviations alike: first say in the plainest words what the thing
+   IS (with a tiny everyday picture when that helps), and only then use
+   its name freely. Never let a term pass unexplained because it «seems
+   obvious»; never build a new idea on a word the reader has not yet
+   been given. When a later idea needs an earlier one, remind the reader
+   of it in one short plain sentence instead of assuming they remember.
+   The test of every paragraph: a bright first-time reader, reading
+   slowly, understands it fully without looking anything up.
 
 ## نمونهٔ تأییدشده — The approved sample
 
