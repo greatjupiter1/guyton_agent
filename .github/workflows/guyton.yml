@@ -54,7 +54,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: gemini-2.5-flash
+          GEMINI_MODEL: gemini-3.5-flash
           CHAT_ID: ${{ secrets.CHAT_ID }}
           CONTENT_ONLY: ${{ inputs.content_only }}
         run: python build_lesson.py
